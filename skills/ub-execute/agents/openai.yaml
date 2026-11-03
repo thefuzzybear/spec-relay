@@ -1,0 +1,11 @@
+interface:
+  display_name: "Spec Relay"
+  short_description: "Execute reviewed specs with native Codex agents"
+  default_prompt: "Use $ub-execute to implement the reviewed specification with native sub-agents and verified evidence."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "ub-execute"
+      description: "Track execution tasks, worktrees, checks, and evidence."
+policy:
+  allow_implicit_invocation: true

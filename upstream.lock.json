@@ -1,0 +1,18 @@
+{
+  "ub-mode": {
+    "repository": "https://github.com/unclebob/ub-mode",
+    "commit": "3da62bf3fcfd2034de41f30d920d2739e566171f"
+  },
+  "crapper": {
+    "repository": "https://github.com/unclebob/crapper",
+    "commit": "6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d"
+  },
+  "dryer": {
+    "repository": "https://github.com/unclebob/dryer",
+    "commit": "66ff6d21a42c04afcad89c78a80066176d1294b0"
+  },
+  "mutator": {
+    "repository": "https://github.com/unclebob/mutator",
+    "commit": "a5a0cb803b66e0cdb8bf471b3b08af701d424a41"
+  }
+}

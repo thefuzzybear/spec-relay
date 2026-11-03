@@ -1,0 +1,12 @@
+.upstream/
+.venv/
+.state/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+coverage/
+.metrics/
+dist/
+.parser-cache/
+.evaluation/
