@@ -37,20 +37,8 @@ class Store:
                     data TEXT NOT NULL);
             """)
 
-    @contextmanager
     def transaction(self):
-        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("BEGIN IMMEDIATE")
-        try:
-            yield db
-            db.commit()
-        except BaseException:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        return sqlite_transaction(self.path, wal=True)
 
     def put(self, db, kind, value):
         db.execute("INSERT INTO objects VALUES (?, ?, ?, ?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data",
@@ -71,3 +59,20 @@ class Store:
             raise WorkflowError("Provide a reason for the action.")
         db.execute("INSERT INTO events(run_id,time,action,reason,data) VALUES(?,?,?,?,?)",
                    (run_id, time.time(), action, reason, encode(data)))
+
+
+@contextmanager
+def sqlite_transaction(path, wal=False):
+    db = sqlite3.connect(path, timeout=30, isolation_level=None)
+    try:
+        if wal:
+            db.execute('PRAGMA busy_timeout=30000')
+            db.execute('PRAGMA journal_mode=WAL')
+        db.execute('BEGIN IMMEDIATE')
+        yield db
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    finally:
+        db.close()

@@ -29,6 +29,7 @@ def validate_bundle(raw):
     bundle = json.loads(json.dumps(raw))
     need(type(bundle.get("version")) is int and bundle["version"] == 1, "Use execution bundle version 1.")
     _locations_and_limits(bundle)
+    _lifecycle(bundle)
     _readiness(bundle.get("readiness", {}))
     requirement_ids = _requirements(bundle.get("requirements"))
     checks = _checks(bundle.get("checks"))
@@ -88,6 +89,9 @@ def _checks(checks):
         seconds = check.get("timeout_seconds", 300)
         need(isinstance(seconds, (float, int)) and math.isfinite(seconds) and 0 < seconds <= 86400, "Invalid check timeout.")
         check["timeout_seconds"] = seconds
+        if 'environment_dependencies' in check:
+            names(check['environment_dependencies'], 'environment dependencies', empty=True)
+            need(set(check['environment_dependencies']) <= {'source','dependencies','database','data','http'}, 'Unknown environment dependency.')
     return checks
 
 
@@ -131,3 +135,16 @@ def _dependencies(tasks, ids):
 
 def _command(argv):
     need(isinstance(argv, list) and argv and all(isinstance(arg, str) and arg for arg in argv), "Provide command arguments.")
+
+
+def _lifecycle(bundle):
+    mode = bundle.setdefault('workspace_mode', 'standalone')
+    need(mode in {'standalone','attached_parent'}, 'Use standalone or attached_parent workspace mode.')
+    if mode == 'attached_parent':
+        text(bundle.get('workspace_id'), 'the attached parent workspace ID')
+    else:
+        need(not bundle.get('workspace_id'), 'Use attached_parent mode with a workspace ID.')
+    policy = bundle.get('cleanup_policy', {})
+    need(isinstance(policy, dict) and set(policy) <= {'authorized','on_complete'}, 'Invalid cleanup policy.')
+    need(all(type(value) is bool for value in policy.values()), 'Cleanup policy values must be boolean.')
+    need(not policy.get('on_complete') or policy.get('authorized'), 'Automatic cleanup requires explicit authorization.')

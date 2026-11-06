@@ -52,6 +52,22 @@ An optional task `tdd_exception` records why an honest automated behavior test i
 
 `max_attempts` defaults to three. `max_parallel_tasks` defaults to two. Configure these values during intake. Changes to a run's requirements or policy require a new bundle and run. Existing worktrees remain available for deliberate reuse.
 
-The runtime preserves the original branch. It integrates accepted task commits into its own branch. Each final check must pass against the current combined source. A final review must cover every requirement before completion.
+Standalone execution preserves the original branch and integrates into a runtime branch. Attached execution integrates into the prepared parent branch. Each final check must pass against the current combined source. A final review must cover every requirement before completion.
 
 The append-only event record contains completed operations and their reasons. It is an operational audit record. It is not a tamper-proof record of every shell action.
+
+
+## Optional workspace and cleanup policy
+
+Use `workspace_mode: "attached_parent"` with the `workspace_id` returned by `workspace_attach`.
+Set `repository` to the prepared parent root. Standalone mode remains the default.
+See [parent operations](../../../docs/workspace-operations.md) for private configuration, schema proposals, services, and environment generations.
+
+Each check can declare `environment_dependencies`: `source`, `dependencies`, `database`, `data`, or `http`.
+Use an empty list only for checks that do not depend on the shared environment.
+Attached checks otherwise depend on the prepared dependencies and configured database.
+
+Use `cleanup_policy: {"authorized": true, "on_complete": true}` when the user authorizes automatic completed worktree cleanup.
+The orchestrator must also release actual native writers, reviewers, and owned services for each exact resource revision.
+See [cleanup operations](../../../docs/cleanup-operations.md) for preservation, authorization, and restoration.
+Existing runs without creation manifests remain protected.

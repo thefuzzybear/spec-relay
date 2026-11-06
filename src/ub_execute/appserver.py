@@ -10,6 +10,7 @@ import threading
 import time
 
 from .store import WorkflowError
+from . import __version__
 
 
 class NeedsInput(WorkflowError):
@@ -31,7 +32,7 @@ class AppServer:
                                         stderr=self.log, text=True, bufsize=1, start_new_session=True)
         threading.Thread(target=self._read, daemon=True).start()
         try:
-            self.request("initialize", {"clientInfo": {"name": "ub-execute", "title": "UB Execute", "version": "0.1.0"}})
+            self.request("initialize", {"clientInfo": {"name": "ub-execute", "title": "UB Execute", "version": __version__}})
             self._send({"method": "initialized", "params": {}})
         except BaseException:
             self.__exit__(None, None, None)

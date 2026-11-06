@@ -37,7 +37,7 @@ The agent reads the spec and repository instructions. It builds a version 1 exec
 
 Each worker owns a separate worktree. It records a failing behavior test, implements the behavior, refactors, runs configured checks, and commits the candidate. A fresh reviewer evaluates the candidate and evidence. The runtime accepts current evidence and integrates accepted tasks in dependency order.
 
-Final checks run against the combined branch. A final reviewer must address every requirement. Completion preserves the original branch and returns the integration branch. Repository instructions govern later pushes, pull requests, merges, and deployments.
+Final checks run against the combined branch. A final reviewer must address every requirement. Standalone completion returns the integration branch. Attached execution integrates into the prepared parent feature branch. Repository instructions govern later pushes, pull requests, merges, and deployments.
 
 Read the [execution contract](skills/ub-execute/references/execution-contract.md) for bundle fields and check configuration. The agent constructs this bundle. The runtime does not infer requirements from prose.
 
@@ -70,7 +70,13 @@ Commands, scope, and required checks come from the intake bundle. Missing or uns
 
 ## Recovery and limits
 
-Use `run_recover` to inspect unfinished attempts, check workers, and integration state. Abandoned attempts keep their files. Replacements receive new worktrees. No cleanup tool deletes worktrees.
+Use `run_recover` to inspect unfinished attempts, check workers, integration state, and cleanup progress. Abandoned attempts keep their files.
+
+Version 0.2 adds [completed run cleanup](docs/cleanup-operations.md). Authorized cleanup archives every eligible worktree and tests restoration before ordinary Git removal. Dirty work, unknown files, active writers, and historical worktrees without ownership manifests remain protected. Branches and private recovery archives remain available.
+
+[Prepared parent workspaces](docs/workspace-operations.md) reuse a feature worktree's dependencies and local PostgreSQL database. Children borrow dependency links and receive restricted private environments. The parent applies independently reviewed schema proposals through a coordinator CLI. Child cleanup never removes the prepared parent or its database.
+
+The PostgreSQL adapter uses optional `.[postgres]` dependencies. Native agents share operating system access, so parent environments report cooperative capability. Restricted database roles enforce the supplied worker credential's permissions. Hard isolation requires a separate sandbox or broker.
 
 Integration records its intent before changing Git state. `integration_reconcile` checks completed or aborted cherry-picks after interruption. Unresolved conflicts require inspection. The runtime never discards them automatically.
 
@@ -84,6 +90,7 @@ Agents with shell access can bypass procedures and edit state. Agent IDs are aud
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover the execution lifecycle, concurrent claims, stale evidence, review binding, recovery, MCP messages, and continuation policy. Quality integration tests require the optional dependencies and selected parsers.
+Tests cover execution, parent environments, schema application, cleanup restoration, concurrent claims, stale evidence, recovery, MCP messages, and continuation policy.
+Node source-resolution fixtures require an available Node.js runtime. PostgreSQL tests require a disposable test server. Quality integration tests require the optional dependencies and selected parsers.
 
 See the [verification record](docs/verification.md) for test results and limits. Spec Relay uses the [MIT license](LICENSE). The pinned upstream copies retain their own [licenses and attribution](docs/fork-notes.md).

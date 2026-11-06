@@ -16,7 +16,7 @@ def runner_fingerprint():
     for path in sorted(files):
         digest.update(str(path.relative_to(root)).encode() + b"\0")
         digest.update(path.read_bytes())
-    for name in ("tree-sitter", "tree-sitter-language-pack", "coverage"):
+    for name in ("tree-sitter", "tree-sitter-language-pack", "coverage", "psycopg", "psycopg-binary"):
         try:
             version = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:

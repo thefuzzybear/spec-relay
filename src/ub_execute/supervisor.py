@@ -119,4 +119,10 @@ def supervise(runtime, run_id, thread_id, max_turns=10, max_seconds=3600, client
     factory = client_factory or (lambda: AppServer(run["repository"], root / "app-server.log"))
     with controller_lock(root / "controller.lock"), factory() as client:
         _resume(client, thread_id)
-        return _drive(client, runtime, run_id, thread_id, max_turns, max_seconds)
+        result = _drive(client, runtime, run_id, thread_id, max_turns, max_seconds)
+    if result['status'] == 'complete':
+        run, _ = _snapshot(runtime, run_id)
+        cleanup = runtime._auto_cleanup(run)
+        if cleanup:
+            result['cleanup'] = cleanup
+    return result

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ub-execute"
-version = "0.1.0"
+version = "0.2.0"
 description = "Execute reviewed specifications with Codex sub-agents and durable UBMode evidence."
 requires-python = ">=3.11"
 dependencies = []
@@ -12,6 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 quality = ["tree-sitter==0.26.0", "tree-sitter-language-pack==1.23.1", "coverage==7.17.0", "pytest==9.2.0"]
 dev = ["PyYAML==6.0.3"]
+postgres = ["psycopg[binary]>=3.2,<4"]
 
 [project.scripts]
 ub-execute = "ub_execute.cli:main"

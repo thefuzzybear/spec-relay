@@ -65,6 +65,19 @@ class SupervisorTest(unittest.TestCase):
             supervise(self.runtime, "run-test", "thread-test", client_factory=lambda: client)
         self.assertEqual(client.turns, 0)
 
+    def test_cleanup_runs_after_supervisor_releases_controller(self):
+        from unittest.mock import patch
+        from ub_execute.processes import is_locked
+        client = FakeClient(self.runtime, 'run-test')
+        observed = []
+        def enqueue(run):
+            observed.append(is_locked(self.runtime.store.root/'runs'/'run-test'/'controller.lock'))
+            return {'status':'queued'}
+        with patch.object(self.runtime, '_auto_cleanup', side_effect=enqueue):
+            result = supervise(self.runtime, 'run-test', 'thread-test', client_factory=lambda:client)
+        self.assertEqual(observed, [False], 'Authorized cleanup must start after the continuation controller releases its lock.')
+        self.assertEqual(result['cleanup']['status'], 'queued')
+
 
 if __name__ == "__main__":
     unittest.main()

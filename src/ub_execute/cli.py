@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from .runtime import Runtime
+from .contracts import need
 from .tools import call, catalog
 
 
@@ -32,6 +33,16 @@ def build_parser():
     quality.add_argument("--workers", type=int, default=2)
     setup = sub.add_parser("quality-setup")
     setup.add_argument("languages", nargs="+", default=["python"])
+    coordinator = sub.add_parser('coordinator')
+    operations = coordinator.add_subparsers(dest='operation', required=True)
+    apply = operations.add_parser('apply')
+    apply.add_argument('--proposal-id', required=True)
+    apply.add_argument('--capability-file', required=True)
+    apply.add_argument('--reason', required=True)
+    recover = operations.add_parser('recover')
+    recover.add_argument('--workspace-id', required=True)
+    recover.add_argument('--resolution', choices=['retry'])
+    recover.add_argument('--reason', required=True)
     supervisor = sub.add_parser("supervise")
     supervisor.add_argument("--run-id", required=True)
     supervisor.add_argument("--thread-id", required=True)
@@ -46,6 +57,8 @@ def execute(args):
     if args.command == "call":
         raw = args.args if args.args is not None else Path(args.args_file).read_text()
         return call(Runtime(args.state), args.name, json.loads(raw))
+    if args.command == 'coordinator':
+        return _coordinator(args)
     if args.command == "quality":
         from .quality import analyze
         return analyze(args.tool, args.root, args.paths, json.loads(args.coverage_json), args.coverage_files,
@@ -56,6 +69,20 @@ def execute(args):
     from .supervisor import supervise
     return supervise(Runtime(args.state), args.run_id, args.thread_id, args.max_turns, args.max_seconds)
 
+
+
+def _coordinator(args):
+    runtime = Runtime(args.state)
+    if args.operation == 'apply':
+        return runtime.coordinator_apply(args.proposal_id, _capability(args.capability_file), args.reason)
+    return runtime.coordinator_recover(args.workspace_id, args.reason, args.resolution)
+
+
+def _capability(filename):
+    path = Path(filename)
+    need(not path.is_symlink(), 'Use a private coordinator capability file.')
+    need(not path.stat().st_mode & 0o077, 'Use a private coordinator capability file.')
+    return path.read_text().strip()
 
 def main():
     args = build_parser().parse_args()

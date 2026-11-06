@@ -27,6 +27,21 @@ Use `tools` to inspect argument schemas. The runtime source and interpreter path
 
 The bundle must preserve requirements, constraints, decisions, unresolved findings, and the authorized delivery outcome. Resolve material ambiguity before implementing dependent work. Continue independent work when possible. Do not invent product decisions or mark an incomplete EGM review as ready.
 
+## Use a prepared parent
+
+When execution starts in a prepared feature worktree, read [parent workspace operations](../../docs/workspace-operations.md).
+Attach that worktree with `workspace_attach`. Select `attached_parent` in the bundle and use the returned workspace ID.
+
+Children borrow the parent's dependencies and restricted database credential. Run checks through `check_start` to use the generated environment and leases.
+Configure each tool's outputs and caches inside its child. Require an adapter before checks can write into borrowed dependencies.
+Keep schema pushes and dependency installation with the parent coordinator. Do not run the repository's environment preparation command for each child.
+
+Require independent review of schema-only proposals. Apply them through the coordinator CLI before affected database checks.
+Reconcile clean child branches with the updated parent, then call `workspace_refresh`. Preserve dirty work for reconciliation.
+
+Register owned child services before dependent checks. Stop them through the repository workflow before `service_release`.
+Check that child HTTP checks exercise child code. Restart a registered server after its source changes.
+
 ## Orchestrate native sub-agents
 
 Act as the orchestrator. Explicitly spawn native sub-agents for bounded implementation tasks and independent reviews. Use the host's available spawn, message, wait, and interruption tools. Do not simulate independent agents in the main context.
@@ -90,6 +105,20 @@ After an interruption, call `run_recover`. Inspect native agents and preserved w
 After two approaches fail at the same gate, record their shared premise and reconsider it. Use the attempt limit to prevent repeated replacement without diagnosis. Preserve unresolved decisions and request only the input needed to continue.
 
 Honor user pauses and cancellations. Report completion, a failure that needs action, or a material decision. Avoid repeated updates when the state does not change.
+
+## Release completed worktrees
+
+Read [cleanup operations](../../docs/cleanup-operations.md) before enabling cleanup.
+Include an authorized `cleanup_policy` only when the user's instructions permit completed managed worktree removal.
+Otherwise, present the exact cleanup plan and obtain the required authorization before `cleanup_authorize`.
+
+Check actual native worker and reviewer completion. Stop owned child services and release their leases.
+Call `writer_release` for each exact resource revision after those actors finish.
+Record generated outputs through `artifact_register` after the producing operation. Do not adopt unknown files by filename pattern.
+
+After `run_complete`, inspect the separate cleanup result. Use `cleanup_status` or `run_recover` to continue unfinished cleanup.
+Report removed resources, blocked resources, retained branches, and private archive references.
+The runtime never removes a borrowed prepared parent or its database. The parent PR workflow owns their retention.
 
 ## Evidence limits
 

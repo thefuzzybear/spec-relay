@@ -15,9 +15,12 @@ from .store import Store, WorkflowError, encode, identifier
 from .workspace import add_worktree, changed_paths, file_names, fingerprint, git, require_clean, selected
 from .processes import is_locked
 from .provenance import runner_fingerprint
+from .lifecycle import Lifecycle
+from .cleanup import resource_manifest
+from .parent import ParentManager
 
 
-class Runtime:
+class Runtime(Lifecycle):
     def __init__(self, state):
         self.store = Store(state)
 
@@ -45,15 +48,23 @@ class Runtime:
             destination = directory / f"review-{index}.md"
             destination.write_bytes(data)
             artifacts.append({"original": str(Path(original).resolve()), "snapshot": str(destination), "digest": hashlib.sha256(data).hexdigest()})
-        branch = f"ub/{run_id}/integration"
-        tree = add_worktree(repo, directory / "integration", branch, base)
+        workspace_id = bundle.get('workspace_id')
+        if workspace_id:
+            workspace = self.workspace_context(workspace_id)
+            need(workspace['parent_path'] == repo, 'Use the attached parent as the bundle repository.')
+            need(workspace['status'] == 'ready', 'Reconcile the parent environment before execution.')
+            tree, branch = repo, workspace['branch']
+        else:
+            branch = f"ub/{run_id}/integration"
+            tree = add_worktree(repo, directory / "integration", branch, base)
         run = {"id": run_id, "status": "active", "repository": repo, "base_commit": base,
                "integration_commit": base, "integration_branch": branch, "worktree": tree,
                "spec_digest": hashlib.sha256(spec.encode()).hexdigest(), "bundle": bundle,
                "review_artifacts": artifacts,
-               "created_at": time.time()}
+               "created_at": time.time(), "workspace_id": workspace_id, "integration_owned": not bool(workspace_id)}
         with self.store.transaction() as db:
             self.store.put(db, "run", run)
+            self.store.put(db, "cleanup_resource", resource_manifest(run))
             for definition in bundle["tasks"]:
                 task = {**definition, "id": run_id + "/" + definition["id"], "task_id": definition["id"],
                         "run_id": run_id, "status": "pending", "attempts": []}
@@ -64,6 +75,11 @@ class Runtime:
     def _run(self, db, run_id, active=False):
         run = self.store.get(db, "run", run_id)
         if active:
+            self._mutable(db, run_id)
+            need(not run.get("schema_staging"), "Reconcile the pending schema staging intent first.")
+            if run.get("workspace_id"):
+                workspace = self.store.get(db, "parent_workspace", run["workspace_id"])
+                need(workspace["status"] == "ready", "Reconcile the parent environment before runtime changes.")
             need(run["status"] == "active", f"The run is {run['status']}.")
         return run
 
@@ -88,7 +104,9 @@ class Runtime:
             jobs = self.store.list(db, "job", run_id)
             return {**self._summary(run), "tasks": tasks,
                     "jobs": [{key: job[key] for key in ("id", "check_id", "status", "attempt_id", "phase")} for job in jobs],
-                    "requirements": run["bundle"]["requirements"]}
+                    "requirements": run["bundle"]["requirements"],
+                    "resources": self.store.list(db, "cleanup_resource", run_id),
+                    "cleanup": self.store.list(db, "cleanup", run_id)}
 
     def run_events(self, run_id, after=0, limit=100):
         with self.store.transaction() as db:
@@ -112,6 +130,7 @@ class Runtime:
         need(action in {"pause", "resume", "cancel"}, "Use pause, resume, or cancel.")
         with self.store.transaction() as db:
             run = self._run(db, run_id)
+            self._mutable(db, run_id)
             need(run["status"] not in {"complete", "cancelled"}, "The run is terminal.")
             run["status"] = {"pause": "paused", "resume": "active", "cancel": "cancelled"}[action]
             self.store.put(db, "run", run)
@@ -136,10 +155,12 @@ class Runtime:
             for dependency in task["depends_on"]:
                 need(self._task(db, run_id, dependency)["status"] == "integrated", "A task dependency is not integrated.")
             attempt_id = identifier("attempt")
-            branch = f"ub/{run_id}/{task_id}/{attempt_id}"
+            branch = f"ub/{run_id}/tasks/{task_id}/{attempt_id}"
             tree = add_worktree(run["repository"], self.store.root / "runs" / run_id / attempt_id, branch, run["integration_commit"])
             attempt = {"id": attempt_id, "run_id": run_id, "task_id": task_id, "agent_id": agent_id,
                        "worktree": tree, "branch": branch, "base_commit": run["integration_commit"], "status": "running"}
+            ParentManager(self).prepare_child(db, run, attempt)
+            self.store.put(db, "cleanup_resource", resource_manifest(run, attempt))
             task["attempts"].append(attempt_id)
             task["status"] = "running"
             self.store.put(db, "attempt", attempt)
@@ -154,21 +175,27 @@ class Runtime:
             attempt = self._attempt(db, run_id, attempt_id) if attempt_id else None
             if attempt:
                 need(attempt["task_id"] == task_id, "The attempt belongs to another task.")
-            root = Path(run["repository"])
-            instructions = []
-            for parent in reversed([root, *root.parents]):
-                path = parent / "AGENTS.md"
-                if path.is_file():
-                    instructions.append(str(path))
             tree = Path(attempt["worktree"] if attempt else run["worktree"])
-            instructions.extend(str(tree / name) for name in file_names(tree) if Path(name).name == "AGENTS.md")
+            instructions = self._instruction_paths(run, tree)
+            resource_id = attempt["id"] if attempt else run_id + "/integration"
+            resource = next((item for item in self.store.list(db, "cleanup_resource", run_id) if item["id"] == resource_id), None)
             return {"run_id": run_id, "task": task, "attempt": attempt,
                     "spec_snapshot": str(self.store.root / "runs" / run_id / "spec.md"),
                     "requirements": [entry for entry in run["bundle"]["requirements"] if entry["id"] in task["requirements"]],
                     "checks": {key: run["bundle"]["checks"][key] for key in task["checks"]},
                     "review_artifacts": run.get("review_artifacts", []),
                     "instruction_paths": sorted(set(instructions)), "decisions": run["bundle"].get("decisions", []),
-                    "constraints": run["bundle"].get("constraints", [])}
+                    "constraints": run["bundle"].get("constraints", []),
+                    "resource": resource, "parent_environment": attempt.get("parent_environment") if attempt else None}
+
+    @staticmethod
+    def _instruction_paths(run, tree):
+        root = Path(run['repository'])
+        paths = [str(parent / 'AGENTS.md') for parent in reversed([root, *root.parents])
+                 if (parent / 'AGENTS.md').is_file()]
+        if tree.is_dir():
+            paths.extend(str(tree / name) for name in file_names(tree) if Path(name).name == 'AGENTS.md')
+        return paths
 
     def check_start(self, run_id, check_id, phase, reason, attempt_id=None):
         text(reason, "an action reason")
@@ -190,6 +217,8 @@ class Runtime:
                    "fingerprint": fingerprint(tree),
                    "runner_fingerprint": runner_fingerprint(),
                    "test_fingerprint": fingerprint(tree, task["test_paths"]) if task else None}
+            attempt = self._attempt(db, run_id, attempt_id) if attempt_id else None
+            ParentManager(self).acquire_check(db, run, job, attempt)
             self.store.put(db, "job", job)
             self.store.event(db, run_id, "check_started", reason, {"job_id": job_id, "check_id": check_id, "phase": phase})
         return self._launch_job(job)
@@ -208,7 +237,7 @@ class Runtime:
 
     def _launch_job(self, job):
         job_id, directory = job["id"], Path(job["directory"])
-        environment = dict(os.environ)
+        environment = ParentManager(self).worker_environment(job)
         source = str(Path(__file__).resolve().parents[1])
         environment["PYTHONPATH"] = source + os.pathsep + environment.get("PYTHONPATH", "")
         try:
@@ -224,6 +253,7 @@ class Runtime:
             with self.store.transaction() as db:
                 job = self.store.get(db, "job", job_id)
                 job.update(status="error", error=str(exc))
+                ParentManager(self).release_check(db, job)
                 self.store.put(db, "job", job)
         return job
 
@@ -237,8 +267,14 @@ class Runtime:
             if job["status"] in {"queued", "running"} and time.time() - job["created_at"] > 5 and not self._worker_alive(job):
                 self._stop_orphan_command(job)
                 job["status"] = "interrupted"
+                ParentManager(self).release_check(db, job)
                 self.store.put(db, "job", job)
                 self.store.event(db, job["run_id"], "check_interrupted", "The check worker is no longer running.", {"job_id": job_id})
+        with self.store.transaction() as db:
+            job = self.store.get(db, 'job', job_id)
+            if job['status'] not in {'queued','running'} and not self._worker_alive(job) and not is_locked(Path(job['directory']) / 'command.lock'):
+                ParentManager(self).release_check(db, job)
+                self.store.put(db, 'job', job)
         tails = {}
         for name in ("stdout.log", "stderr.log", "worker.log"):
             path = Path(job["directory"]) / name
@@ -262,6 +298,12 @@ class Runtime:
             except ProcessLookupError:
                 pass
         self._stop_orphan_command(job)
+        # Release environment access only after both the worker and command locks end.
+        with self.store.transaction() as db:
+            current = self.store.get(db, 'job', job_id)
+            if not self._worker_alive(current) and not is_locked(Path(current['directory']) / 'command.lock'):
+                ParentManager(self).release_check(db, current)
+                self.store.put(db, 'job', current)
         return job
 
     @staticmethod
@@ -303,7 +345,8 @@ class Runtime:
         runner = runner_fingerprint()
         jobs = [job for job in self.store.list(db, "job", run["id"]) if job["attempt_id"] == attempt["id"]]
         for check_id in task["checks"]:
-            good = [job for job in jobs if self._current_task_check(job, check_id, digest, runner)]
+            good = [job for job in jobs if self._current_task_check(job, check_id, digest, runner)
+                    and ParentManager(self).accepts_check(db, run, job)]
             need(bool(good), f"Current passing evidence is missing for check {check_id}.")
         if not task.get("tdd_exception"):
             self._require_red_cycle(jobs, fingerprint(tree, task["test_paths"]), digest)
@@ -334,7 +377,7 @@ class Runtime:
             git(attempt["worktree"], "merge-base", "--is-ancestor", attempt["base_commit"], "HEAD")
             need(not git(attempt["worktree"], "rev-list", "--merges", attempt["base_commit"] + "..HEAD"), "Submit ordered commits without merge commits.")
             changed = changed_paths(attempt["worktree"], attempt["base_commit"])
-            need(changed, "The candidate contains no changes.")
+            need(changed or self._provisional_task(db, run, attempt, task), "The candidate contains no changes.")
             need(all(selected(path, task["scope"]) for path in changed), "The candidate changes files outside its task scope.")
             digest = self._task_evidence(db, run, attempt, task)
             attempt.update(status="submitted", candidate_commit=git(attempt["worktree"], "rev-parse", "HEAD"), candidate_fingerprint=digest)
@@ -380,7 +423,7 @@ class Runtime:
             self.store.event(db, run_id, "task_accepted", reason, {"attempt_id": attempt_id})
             return attempt
 
-    def task_integrate(self, run_id, task_id, reason):
+    def _task_integrate(self, run_id, task_id, reason):
         text(reason, "an action reason")
         with self.store.transaction() as db:
             run = self._run(db, run_id, active=True)
@@ -395,8 +438,12 @@ class Runtime:
             require_clean(tree)
             need(git(tree, "rev-parse", "HEAD") == run["integration_commit"], "Reconcile the interrupted integration before continuing.")
             need(not any(job["status"] in {"queued", "running"} and job["worktree"] == tree for job in self.store.list(db, "job", run_id)), "A final check owns the integration worktree.")
-            commits = git(tree, "rev-list", "--reverse", attempt["base_commit"] + ".." + attempt["candidate_commit"]).splitlines()
-            need(commits, "The accepted candidate contains no commits.")
+            commits = self._remaining_commits(db, run, attempt, task)
+            if not commits:
+                task.update(status='integrated', integrated_commit=run['integration_commit'])
+                self.store.put(db, 'task', task)
+                self.store.event(db, run_id, 'task_integrated', reason, {'task_id': task_id, 'provisional_only': True})
+                return task
             need(not run.get("integrating_task"), "Another integration needs reconciliation.")
             run["integrating_task"] = task_id
             task["status"] = "integrating"
@@ -413,11 +460,12 @@ class Runtime:
                 self.store.put(db, "run", run)
                 self.store.event(db, run_id, "integration_conflict", reason, {"task_id": task_id, "error": str(exc)})
             return {"status": "needs_attention", "worktree": tree, "error": str(exc)}
-        return self.integration_reconcile(run_id=run_id, reason=reason)
+        return self._integration_reconcile(run_id=run_id, reason=reason)
 
-    def integration_reconcile(self, run_id, reason):
+    def _integration_reconcile(self, run_id, reason):
         with self.store.transaction() as db:
             run = self._run(db, run_id)
+            self._mutable(db, run_id)
             need(run["status"] not in {"complete", "cancelled"}, "The run is terminal.")
             task_id = run.get("integrating_task")
             need(task_id, "The run has no pending integration intent.")
@@ -425,6 +473,8 @@ class Runtime:
             tree = run["worktree"]
             require_clean(tree)
             marker = Path(git(tree, "rev-parse", "--git-path", "CHERRY_PICK_HEAD"))
+            if not marker.is_absolute():
+                marker = Path(tree) / marker
             need(not marker.exists(), "Finish or abort the active cherry-pick before reconciliation.")
             intent = task["integration_intent"]
             head = git(tree, "rev-parse", "HEAD")
@@ -435,7 +485,7 @@ class Runtime:
                 need(all(commit in messages for commit in intent["commits"]), "The integration history does not contain every accepted commit marker.")
                 need(all(selected(path, task["scope"]) for path in changed_paths(tree, intent["before"])), "The integration changes files outside the task scope.")
                 task.update(status="integrated", integrated_commit=head)
-                run["integration_commit"] = head
+                self._advance_parent(db, run, intent["before"], head)
             run.pop("integrating_task")
             if run["status"] == "needs_attention":
                 run["status"] = "active"
@@ -469,7 +519,9 @@ class Runtime:
         return {"run": self._summary(run), "attempts": [{**attempt, "worktree_exists": Path(attempt["worktree"]).exists(),
                   "dirty": bool(git(attempt["worktree"], "status", "--porcelain")) if Path(attempt["worktree"]).exists() else None} for attempt in attempts],
                 "jobs": [{"id": job["id"], "status": job["status"]} for job in jobs],
-                "integration_head": git(run["worktree"], "rev-parse", "HEAD"),
+                "integration_head": git(run["worktree"], "rev-parse", "HEAD") if Path(run["worktree"]).is_dir() else None,
+                "resources": self.run_status(run_id)["resources"],
+                "cleanup": self._recover_cleanup(run_id),
                 "next_action": "Inspect preserved work. Resume only after reconciling live workers and integration state."}
 
     def run_complete(self, run_id, reason):
@@ -482,7 +534,8 @@ class Runtime:
             jobs = self.store.list(db, "job", run_id)
             runner = runner_fingerprint()
             for check_id in run["bundle"]["final_checks"]:
-                need(any(self._current_final_check(job, check_id, digest, runner) for job in jobs),
+                need(any(self._current_final_check(job, check_id, digest, runner)
+                         and ParentManager(self).accepts_check(db, run, job) for job in jobs),
                      f"Current final evidence is missing for check {check_id}.")
             reviews = self.store.list(db, "final_review", run_id)
             need(reviews and reviews[-1]["fingerprint"] == digest and reviews[-1]["commit"] == run["integration_commit"] and not reviews[-1]["findings"],
@@ -490,7 +543,8 @@ class Runtime:
             run["status"] = "complete"
             self.store.put(db, "run", run)
             self.store.event(db, run_id, "run_completed", reason, {"commit": run["integration_commit"]})
-            return self._summary(run)
+        cleanup = self._auto_cleanup(run)
+        return {**self._summary(run), **({"cleanup": cleanup} if cleanup else {})}
 
     @staticmethod
     def _current_final_check(job, check_id, digest, runner):

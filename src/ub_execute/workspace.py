@@ -88,3 +88,8 @@ def add_worktree(repo, path, branch, base):
     path.parent.mkdir(parents=True, exist_ok=True)
     git(repo, "worktree", "add", "-b", branch, str(path), base)
     return str(path)
+
+
+def commit_paths(root, revision):
+    output = subprocess.check_output(['git', '-C', str(root), 'diff-tree', '--root', '--no-commit-id', '--name-only', '--no-renames', '-r', '-z', revision])
+    return [os.fsdecode(path) for path in output.split(b'\0') if path]

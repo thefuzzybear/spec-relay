@@ -13,6 +13,8 @@ from .store import Store, WorkflowError
 from .workspace import fingerprint
 from .processes import held_lock
 from .provenance import runner_fingerprint
+from .parent import ParentManager
+from types import SimpleNamespace
 
 
 def _interrupt(signum, frame):
@@ -23,7 +25,7 @@ def _command_result(job, store):
     directory = Path(job["directory"])
     substitutions = {"{python}": sys.executable, "{worktree}": job["worktree"], "{artifacts}": str(directory)}
     argv = [substitutions.get(arg, arg) for arg in job["check"]["argv"]]
-    environment = dict(os.environ)
+    environment = ParentManager(SimpleNamespace(store=store)).worker_environment(job)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["UB_EXECUTE_ARTIFACTS"] = str(directory)
     process = None
@@ -94,29 +96,31 @@ def run_job(state, job_id):
 
 def _run_job_locked(state, job_id):
     store = Store(state)
+    manager = ParentManager(SimpleNamespace(store=store))
     signal.signal(signal.SIGTERM, _interrupt)
     with store.transaction() as db:
         job = store.get(db, "job", job_id)
         run = store.get(db, "run", job["run_id"])
         if job["status"] != "queued":
+            manager.release_check(db, job)
+            store.put(db, "job", job)
             return
         if run["status"] != "active":
             job["status"] = "cancelled"
+            manager.release_check(db, job)
             store.put(db, "job", job)
             return
         job.update(status="running", pid=os.getpid(), started_at=time.time())
         store.put(db, "job", job)
     try:
-        if runner_fingerprint() != job.get("runner_fingerprint"):
-            job.update(status="invalidated", error="The runtime changed before the check started.")
-        elif fingerprint(job["worktree"]) != job["fingerprint"]:
-            job.update(status="invalidated", error="The source changed before the check started.")
+        reason = _invalid_reason(store, manager, run, job)
+        if reason:
+            job.update(status='invalidated', error=reason + ' before the check started.')
         else:
             job = execute(job, store)
-            if fingerprint(job["worktree"]) != job["fingerprint"]:
-                job.update(status="invalidated", error="The source changed during the check.")
-            if runner_fingerprint() != job.get("runner_fingerprint"):
-                job.update(status="invalidated", error="The runtime changed during the check.")
+            reason = _invalid_reason(store, manager, run, job)
+            if reason:
+                job.update(status='invalidated', error=reason + ' during the check.')
     except (Exception, InterruptedError) as exc:
         job.update(status="error", error=str(exc))
     job["finished_at"] = time.time()
@@ -124,10 +128,28 @@ def _run_job_locked(state, job_id):
         current = store.get(db, "job", job_id)
         if current["status"] == "cancelled":
             job["status"] = "cancelled"
+        if job['status'] == 'passed':
+            manager.attest_check(db,run,job)
+        manager.release_check(db, job)
         store.put(db, "job", job)
         store.event(db, job["run_id"], "check_finished", "The check worker recorded its result.",
                     {"job_id": job_id, "status": job["status"]})
 
+
+
+def _invalid_reason(store, manager, run, job):
+    with store.transaction() as db:
+        if any(item.get('active') for item in store.list(db, 'cleanup_lease', run['id'])):
+            return 'A cleanup lease blocks this check'
+        if not manager.check_lease(db,run,job):
+            return 'The environment lease changed'
+        if not manager.validate_evidence(db, run, job.get('environment')):
+            return 'The parent environment changed'
+    if runner_fingerprint() != job.get('runner_fingerprint'):
+        return 'The runtime changed'
+    if fingerprint(job['worktree']) != job['fingerprint']:
+        return 'The source changed'
+    return None
 
 def main():
     parser = argparse.ArgumentParser()
