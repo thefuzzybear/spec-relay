@@ -523,7 +523,14 @@ class ParentManager:
             record = self.store.get(db,'schema_proposal',proposal_id)
             require(record['status'] == 'requested','Review a requested schema proposal.')
             require(reviewer_id and reviewer_id != record['author'], 'Use an independent schema reviewer.')
+            run = self.store.get(db, 'run', record['run_id'])
+            assignment = self.runtime._assignment(db, run, reviewer_id, 'schema_review', proposal_id)
             record.update(status='reviewed',reviewer_id=reviewer_id)
+            record.update(model_assignment_id=assignment['id'] if assignment else None,
+                          requested_model=assignment['requested_model'] if assignment else None,
+                          reported_model=assignment['reported_model'] if assignment else None,
+                          model_source=assignment['model_source'] if assignment else None,
+                          model_reference=assignment['model_reference'] if assignment else None)
             self.store.put(db,'schema_proposal',record)
             self.store.event(db,record['run_id'],'schema_reviewed',reason,{'proposal_id':proposal_id,'reviewer_id':reviewer_id})
             return record

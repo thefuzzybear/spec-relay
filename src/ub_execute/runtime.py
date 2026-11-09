@@ -16,17 +16,19 @@ from .workspace import add_worktree, changed_paths, file_names, fingerprint, git
 from .processes import is_locked
 from .provenance import runner_fingerprint
 from .lifecycle import Lifecycle
+from .agent_policy import AgentPolicy
 from .cleanup import resource_manifest
 from .parent import ParentManager
 
 
-class Runtime(Lifecycle):
+class Runtime(AgentPolicy, Lifecycle):
     def __init__(self, state):
         self.store = Store(state)
 
     def plan_validate(self, bundle):
         bundle = validate_bundle(bundle)
-        return {"valid": True, "tasks": len(bundle["tasks"]), "requirements": len(bundle["requirements"])}
+        return {"valid": True, "tasks": len(bundle["tasks"]), "requirements": len(bundle["requirements"]),
+                "model_policy": bundle["model_policy"]}
 
     def run_create(self, bundle, reason):
         bundle = validate_bundle(bundle)
@@ -67,7 +69,7 @@ class Runtime(Lifecycle):
             self.store.put(db, "cleanup_resource", resource_manifest(run))
             for definition in bundle["tasks"]:
                 task = {**definition, "id": run_id + "/" + definition["id"], "task_id": definition["id"],
-                        "run_id": run_id, "status": "pending", "attempts": []}
+                        "run_id": run_id, "status": "pending", "attempts": [], "generation": 0}
                 self.store.put(db, "task", task)
             self.store.event(db, run_id, "run_created", reason, {"spec_digest": run["spec_digest"], "base": base})
         return self._summary(run)
@@ -102,7 +104,9 @@ class Runtime(Lifecycle):
             run = self._run(db, run_id)
             tasks = self.store.list(db, "task", run_id)
             jobs = self.store.list(db, "job", run_id)
-            return {**self._summary(run), "tasks": tasks,
+            return {**self._summary(run), "model_policy": run.get("bundle", {}).get("model_policy"),
+                    "model_policy_mode": "legacy" if "model_policy" not in run.get("bundle", {}) else "enforced", "tasks": tasks,
+                    "agent_assignments": self.store.list(db, "agent_assignment", run_id),
                     "jobs": [{key: job[key] for key in ("id", "check_id", "status", "attempt_id", "phase")} for job in jobs],
                     "requirements": run["bundle"]["requirements"],
                     "resources": self.store.list(db, "cleanup_resource", run_id),
@@ -149,6 +153,7 @@ class Runtime(Lifecycle):
             run = self._run(db, run_id, active=True)
             task = self._task(db, run_id, task_id)
             need(task["status"] == "pending", "The task already has an owner or result.")
+            assignment = self._claim_model_assignment(db, run, task_id, agent_id)
             active = [entry for entry in self.store.list(db, "task", run_id) if entry["status"] in {"running", "submitted"}]
             need(len(active) < run["bundle"]["max_parallel_tasks"], "The run reached its concurrent task limit.")
             need(len(task["attempts"]) < run["bundle"].get("max_attempts", 3), "The task reached its attempt limit. Review the failed premise.")
@@ -158,7 +163,12 @@ class Runtime(Lifecycle):
             branch = f"ub/{run_id}/tasks/{task_id}/{attempt_id}"
             tree = add_worktree(run["repository"], self.store.root / "runs" / run_id / attempt_id, branch, run["integration_commit"])
             attempt = {"id": attempt_id, "run_id": run_id, "task_id": task_id, "agent_id": agent_id,
-                       "worktree": tree, "branch": branch, "base_commit": run["integration_commit"], "status": "running"}
+                       "worktree": tree, "branch": branch, "base_commit": run["integration_commit"], "status": "running",
+                       "model_assignment_id": assignment["id"] if assignment else None,
+                       "requested_model": assignment["requested_model"] if assignment else None,
+                       "reported_model": assignment["reported_model"] if assignment else None,
+                       "model_source": assignment["model_source"] if assignment else None,
+                       "model_reference": assignment["model_reference"] if assignment else None}
             ParentManager(self).prepare_child(db, run, attempt)
             self.store.put(db, "cleanup_resource", resource_manifest(run, attempt))
             task["attempts"].append(attempt_id)
@@ -184,6 +194,10 @@ class Runtime(Lifecycle):
                     "requirements": [entry for entry in run["bundle"]["requirements"] if entry["id"] in task["requirements"]],
                     "checks": {key: run["bundle"]["checks"][key] for key in task["checks"]},
                     "review_artifacts": run.get("review_artifacts", []),
+                    "model_policy": run.get("bundle", {}).get("model_policy"),
+                    "model_policy_mode": "legacy" if "model_policy" not in run.get("bundle", {}) else "enforced",
+                    "implementation_agent": self._implementation_context(run, task),
+                    "agent_assignments": self.store.list(db, "agent_assignment", run_id),
                     "instruction_paths": sorted(set(instructions)), "decisions": run["bundle"].get("decisions", []),
                     "constraints": run["bundle"].get("constraints", []),
                     "resource": resource, "parent_environment": attempt.get("parent_environment") if attempt else None}
@@ -396,12 +410,18 @@ class Runtime(Lifecycle):
             attempt = self._attempt(db, run_id, attempt_id)
             need(attempt["status"] == "submitted", "Submit the candidate before review.")
             need(reviewer_id != attempt["agent_id"], "The worker cannot review its own candidate.")
+            assignment = self._assignment(db, self._run(db, run_id), reviewer_id, "task_review", attempt_id)
             need(decision != "accept" or not findings, "Resolve findings before accepting the candidate.")
             need(git(attempt["worktree"], "rev-parse", "HEAD") == attempt["candidate_commit"], "The reviewed candidate changed.")
             need(fingerprint(attempt["worktree"]) == attempt["candidate_fingerprint"], "The reviewed worktree changed.")
             review = {"id": identifier("review"), "run_id": run_id, "attempt_id": attempt_id,
                       "reviewer_id": reviewer_id, "decision": decision, "findings": findings,
-                      "candidate_commit": attempt["candidate_commit"], "fingerprint": attempt["candidate_fingerprint"]}
+                      "candidate_commit": attempt["candidate_commit"], "fingerprint": attempt["candidate_fingerprint"],
+                      "model_assignment_id": assignment["id"] if assignment else None,
+                      "requested_model": assignment["requested_model"] if assignment else None,
+                      "reported_model": assignment["reported_model"] if assignment else None,
+                      "model_source": assignment["model_source"] if assignment else None,
+                      "model_reference": assignment["model_reference"] if assignment else None}
             self.store.put(db, "review", review)
             self.store.event(db, run_id, "review_recorded", reason, review)
             return review
@@ -501,6 +521,7 @@ class Runtime(Lifecycle):
             task = self._task(db, run_id, attempt["task_id"])
             attempt["status"] = "abandoned"
             task["status"] = "pending"
+            task["generation"] = task.get("generation", 0) + 1
             self.store.put(db, "attempt", attempt)
             self.store.put(db, "task", task)
             jobs = self.store.list(db, "job", run_id)
@@ -516,7 +537,10 @@ class Runtime(Lifecycle):
             attempts = self.store.list(db, "attempt", run_id)
             job_ids = [job["id"] for job in self.store.list(db, "job", run_id)]
         jobs = [self.job_status(key) for key in job_ids]
-        return {"run": self._summary(run), "attempts": [{**attempt, "worktree_exists": Path(attempt["worktree"]).exists(),
+        return {"run": {**self._summary(run), "model_policy": run.get("bundle", {}).get("model_policy"),
+                         "model_policy_mode": "legacy" if "model_policy" not in run.get("bundle", {}) else "enforced",
+                         "agent_assignments": self.run_status(run_id)["agent_assignments"]},
+                "attempts": [{**attempt, "worktree_exists": Path(attempt["worktree"]).exists(),
                   "dirty": bool(git(attempt["worktree"], "status", "--porcelain")) if Path(attempt["worktree"]).exists() else None} for attempt in attempts],
                 "jobs": [{"id": job["id"], "status": job["status"]} for job in jobs],
                 "integration_head": git(run["worktree"], "rev-parse", "HEAD") if Path(run["worktree"]).is_dir() else None,
@@ -556,6 +580,7 @@ class Runtime(Lifecycle):
         need(isinstance(findings, list) and isinstance(verified_requirements, list), "Provide review findings and requirement IDs.")
         with self.store.transaction() as db:
             run = self._run(db, run_id, active=True)
+            assignment = self._assignment(db, run, reviewer_id, "final_review", run_id)
             need(all(task["status"] == "integrated" for task in self.store.list(db, "task", run_id)), "Integrate every task before final review.")
             need(reviewer_id not in {attempt["agent_id"] for attempt in self.store.list(db, "attempt", run_id)}, "An implementation worker cannot perform final review.")
             requirement_ids = {entry["id"] for entry in run["bundle"]["requirements"]}
@@ -564,7 +589,12 @@ class Runtime(Lifecycle):
             need(git(run["worktree"], "rev-parse", "HEAD") == run["integration_commit"], "Reconcile the integration revision before review.")
             review = {"id": identifier("final-review"), "run_id": run_id, "reviewer_id": reviewer_id,
                       "verified_requirements": verified_requirements, "findings": findings,
-                      "commit": run["integration_commit"], "fingerprint": fingerprint(run["worktree"])}
+                      "commit": run["integration_commit"], "fingerprint": fingerprint(run["worktree"]),
+                      "model_assignment_id": assignment["id"] if assignment else None,
+                      "requested_model": assignment["requested_model"] if assignment else None,
+                      "reported_model": assignment["reported_model"] if assignment else None,
+                      "model_source": assignment["model_source"] if assignment else None,
+                      "model_reference": assignment["model_reference"] if assignment else None}
             self.store.put(db, "final_review", review)
             self.store.event(db, run_id, "final_review_recorded", reason, review)
             return review

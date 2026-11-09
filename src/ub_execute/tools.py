@@ -6,6 +6,9 @@ from .runtime import Runtime
 from .store import WorkflowError
 
 DESCRIPTIONS = {
+    "agent_requirements": "Read the required model, role, target revision, and native spawn settings before agent creation.",
+    "agent_register": "Record a native agent ID, requested model, role, current target, and optional reported model source.",
+    "task_escalate": "Escalate one pending implementation task from Luna to Sol after prior attempts stop and remain preserved.",
     "workspace_attach": "Attach a prepared parent workspace and check its dependencies and local database.",
     "workspace_context": "Read parent identity, environment generations, and leases without credentials.",
     "workspace_refresh": "Refresh a clean reconciled child against its current parent environment.",
@@ -42,7 +45,7 @@ DESCRIPTIONS = {
     "integration_reconcile": "Reconcile a recorded integration intent after a completed or aborted cherry-pick. Preserve unresolved conflicts.",
     "run_review_record": "Record a fresh final review of all requirements against the combined integration revision.",
 }
-READ_ONLY = {"plan_validate", "run_status", "run_events", "task_context", "workspace_context"}
+READ_ONLY = {"agent_requirements", "plan_validate", "run_status", "run_events", "task_context", "workspace_context"}
 INTEGER = {"after", "limit", "tail_bytes"}
 OBJECT = {"bundle", "details", "config", "proposal", "service"}
 ARRAY = {"findings", "verified_requirements", "paths"}
@@ -67,7 +70,7 @@ def _definition(name):
     required = [key for key, value in parameters.items() if value.default is inspect.Parameter.empty]
     return {"name": name, "description": DESCRIPTIONS[name],
             "inputSchema": {"type": "object", "properties": properties, "required": required, "additionalProperties": False},
-            "annotations": {"readOnlyHint": name in READ_ONLY, "destructiveHint": name in {"run_control", "task_integrate", "job_cancel", "task_abandon", "cleanup_apply", "cleanup_authorize"},
+            "annotations": {"readOnlyHint": name in READ_ONLY, "destructiveHint": name in {"run_control", "task_integrate", "job_cancel", "task_abandon", "task_escalate", "cleanup_apply", "cleanup_authorize"},
                             "openWorldHint": name in {"run_create", "check_start", "workspace_attach", "cleanup_apply", "cleanup_restore"}}}
 
 

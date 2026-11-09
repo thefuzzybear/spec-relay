@@ -49,8 +49,16 @@ class ExecutionTest(unittest.TestCase):
     def create(self):
         return self.runtime.run_create(bundle=self.bundle, reason="Execute the reviewed addition spec.")
 
-    def claim(self, run):
-        return self.runtime.task_claim(run_id=run["id"], task_id="add", agent_id="worker-1", reason="Implement addition.")
+    def register(self, run, agent_id, role, target_id, model=None):
+        requirements = self.runtime.agent_requirements(run["id"], role, target_id)
+        if requirements["policy_mode"] == "legacy":
+            return None
+        return self.runtime.agent_register(run["id"], agent_id, model or requirements["model"], role, target_id,
+                                           reason="Assign the native agent to its current model role.")
+
+    def claim(self, run, agent_id="worker-1"):
+        self.register(run, agent_id, "implementation", "add")
+        return self.runtime.task_claim(run_id=run["id"], task_id="add", agent_id=agent_id, reason="Implement addition.")
 
     def check(self, run, attempt, phase):
         job = self.runtime.check_start(run_id=run["id"], attempt_id=attempt["id"], check_id="test", phase=phase, reason="Check addition.")
@@ -75,6 +83,7 @@ class ExecutionTest(unittest.TestCase):
         return tree
 
     def review(self, run, attempt, decision="accept"):
+        self.register(run, "reviewer-1", "task_review", attempt["id"])
         return self.runtime.review_record(run_id=run["id"], attempt_id=attempt["id"], reviewer_id="reviewer-1",
                                           decision=decision, findings=[], reason="The requirement and behavior test agree.")
 
@@ -92,6 +101,7 @@ class ExecutionTest(unittest.TestCase):
             if self.runtime.job_status(job_id=final["id"])["status"] not in {"queued", "running"}:
                 break
             time.sleep(0.03)
+        self.register(run, "final-reviewer", "final_review", run["id"])
         self.runtime.run_review_record(run_id=run["id"], reviewer_id="final-reviewer", verified_requirements=["REQ-1"], findings=[], reason="The combined behavior meets the spec.")
         result = self.runtime.run_complete(run_id=run["id"], reason="The integrated behavior meets the spec.")
         self.assertEqual(result["status"], "complete")
@@ -169,7 +179,7 @@ class ExecutionTest(unittest.TestCase):
         (tree / "calc.py").write_text("# Work in progress\n")
         self.assertTrue(self.runtime.run_recover(run["id"])["attempts"][0]["dirty"])
         self.runtime.task_abandon(run_id=run["id"], attempt_id=attempt["id"], reason="The worker stopped.")
-        recovered = self.claim(run)
+        recovered = self.claim(run, "worker-2")
         self.assertNotEqual(recovered["worktree"], str(tree))
         self.assertEqual((tree / "calc.py").read_text(), "# Work in progress\n")
 

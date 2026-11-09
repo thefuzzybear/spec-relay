@@ -35,6 +35,10 @@ Try the [first run guide](docs/quickstart.md) on a disposable repository.
 
 The agent reads the spec and repository instructions. It builds a version 1 execution bundle, checks its structure, and creates a run. Each requirement maps to tasks and acceptance criteria.
 
+New runs assign `gpt-6-luna` to coding and `gpt-6.1-sol` to task, schema, and final reviews.
+The orchestrator keeps its selected model. Explicit coding escalation can assign a replacement Sol worker with a recorded reason.
+Read [native model policy](docs/model-policy.md) for assignment, provenance, and unavailable-model handling.
+
 Each worker owns a separate worktree. It records a failing behavior test, implements the behavior, refactors, runs configured checks, and commits the candidate. A fresh reviewer evaluates the candidate and evidence. The runtime accepts current evidence and integrates accepted tasks in dependency order.
 
 Final checks run against the combined branch. A final reviewer must address every requirement. Standalone completion returns the integration branch. Attached execution integrates into the prepared parent feature branch. Repository instructions govern later pushes, pull requests, merges, and deployments.

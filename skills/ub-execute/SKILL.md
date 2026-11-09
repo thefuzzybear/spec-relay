@@ -36,7 +36,8 @@ Children borrow the parent's dependencies and restricted database credential. Ru
 Configure each tool's outputs and caches inside its child. Require an adapter before checks can write into borrowed dependencies.
 Keep schema pushes and dependency installation with the parent coordinator. Do not run the repository's environment preparation command for each child.
 
-Require independent review of schema-only proposals. Apply them through the coordinator CLI before affected database checks.
+For schema-only proposals, use role `schema_review` and the proposal ID with the same native dispatch and registration procedure.
+Apply reviewed proposals through the coordinator CLI before affected database checks.
 Reconcile clean child branches with the updated parent, then call `workspace_refresh`. Preserve dirty work for reconciliation.
 
 Register owned child services before dependent checks. Stop them through the repository workflow before `service_release`.
@@ -48,13 +49,28 @@ Act as the orchestrator. Explicitly spawn native sub-agents for bounded implemen
 
 Keep the main context focused on requirements, decisions, task dependencies, and results. Store detailed evidence through the runtime. Record shell actions and their reasons with `action_record`. The other runtime tools record their own completed operations.
 
+Read [native model policy](../../docs/model-policy.md) before dispatch.
+New runs require `gpt-6-luna` for coding and `gpt-6.1-sol` for task, schema, and final reviews.
+Keep the orchestrator's selected model.
+For stored legacy runs, preserve their original dispatch instructions. Skip the new registration and escalation operations.
+
 For each ready task:
 
-1. Spawn a worker with its run ID, task ID, state directory, and this skill path.
-2. Tell the worker to claim the task using its actual native agent ID.
-3. Require the worker to read `task_context` and applicable instructions.
-4. Require the worker to work only in its assigned worktree.
-5. Wait for actual completion before assigning review or integration.
+1. Call `agent_requirements` with role `implementation` and the task ID.
+2. Spawn a native worker with the returned model and `fork_turns: "none"` when supported.
+3. Supply its run ID, task ID, state directory, specification references, and this skill path.
+4. Call `agent_register` with the actual returned agent ID, requested model, role, target, and reason.
+5. Tell the worker to claim the task using that native agent ID.
+6. Require the worker to read `task_context` and work only in its assigned worktree.
+7. Wait for actual completion before assigning review or integration.
+
+Report a blocker when the host cannot select or access the required model. Do not silently substitute another model.
+Record optional reported model information only from its stated source. Do not infer actual execution from a model request.
+
+For explicit coding escalation, stop the native worker and its owned services before `task_abandon`.
+Call `task_escalate` for the pending task with the orchestrator ID and a specific reason.
+Read the new requirements. Spawn and register a new Sol worker, then claim a new attempt.
+Preserve prior worktrees. Require current checks and fresh review. Escalation does not reset the attempt limit.
 
 Workers must not spawn additional implementation workers. Limit concurrent workers to the host capacity and run policy. Assign dependent tasks after their dependencies integrate. Assign independent tasks in parallel when their contracts permit it.
 
@@ -82,7 +98,12 @@ Checks return job IDs. Inspect bounded log tails while a job runs. Missing depen
 
 ## Review and integrate
 
-Spawn a reviewer with a fresh context. Use `fork_turns: "none"` when the host supports that field. Supply the spec references, task packet, candidate revision, and evidence. Do not supply the worker's conversation or private reasoning.
+Call `agent_requirements` with role `task_review` and the submitted attempt ID.
+Spawn a `gpt-6.1-sol` reviewer with a fresh context. Use `fork_turns: "none"` when supported.
+Register its actual native ID and returned requirements through `agent_register` before `review_record`.
+Supply the spec references, task packet, candidate revision, and evidence.
+Do not supply the worker's conversation or private reasoning. Do not reuse review agents for changed targets.
+Keep each native ID on one model. Use separate IDs for coding and review roles.
 
 Require the reviewer to inspect behavior, test quality, TDD explanations or exceptions, scope, and current evidence. A reviewer must return concrete findings or an acceptance reason. Record the result with `review_record` using its actual native agent ID.
 
@@ -90,7 +111,8 @@ Return findings to the worker. After any candidate change, require new checks, s
 
 Call `task_accept` only after the latest review accepts the candidate. Integrate accepted tasks with `task_integrate`. Preserve conflicts and consult the repository's integration workflow. Use `run_recover` and `integration_reconcile` after an interrupted integration.
 
-Run configured final checks against the combined integration worktree. Obtain a fresh final review against the spec. Record it with `run_review_record`. Call `run_complete` only after every requirement has current evidence.
+Run configured final checks against the combined integration worktree. Use role `final_review` and the run ID to dispatch and register a fresh Sol reviewer against the spec.
+Record its findings with `run_review_record`. Call `run_complete` only after every requirement has current evidence.
 
 Completion produces an integration branch. Perform a push, PR, merge, or deployment only within the user's authorization and repository workflow. Upstream UBMode's main-line instruction does not override those boundaries.
 

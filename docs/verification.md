@@ -1,6 +1,31 @@
 # Verification record
 
-Previous release verification: 2026-11-03.
+The latest verification appears first. Earlier release evidence remains below.
+
+## Version 0.3.0 native model policy verification
+
+Date: 2026-11-10. Platform: macOS, Python 3.14, PostgreSQL 16.
+
+All 172 runtime tests passed with the disposable PostgreSQL test configuration enabled.
+The focused policy suite contains 27 cases.
+Two integration cases directly used that server. The PostgreSQL-gated class contains ten cases, including inherited parent checks.
+No feature or staging database supplied test data.
+
+Focused policy cases exercise fixed role defaults, unknown models, registration, persistence, provenance, target staleness, and review independence.
+They also exercise paused runs, idempotent registration, legacy task shapes, explicit escalation, preserved worktrees, and the attempt limit.
+Independent review reproduced and fixed native ID model changes and asymmetric coding/review role assignment.
+
+A disposable native-agent exercise requested Luna for implementation and Sol 6.1 for independent task and final reviews.
+The worker recorded expected red assertions, passed four behavior tests, and submitted its candidate.
+The run retained requested models and left observed models unknown. The host supplied no observed-model metadata.
+
+Crapper measured all 378 runtime functions below CRAP 10 with fresh coverage.
+Dryer found no structural duplicate candidates at similarity 0.8 or higher.
+Mutation checks killed all 41 selected sites in the new model-policy module. This release does not claim a full-runtime mutation score.
+The skill validator, documentation linter, and MCP initialization and catalog checks passed.
+
+Model assignment remains cooperative. Native dispatch belongs to Codex. Supplied IDs and metadata do not independently authenticate model execution.
+Stored runs without the new policy retain legacy behavior. New runs require the role assignments.
 
 ## Version 0.2.0 lifecycle verification
 

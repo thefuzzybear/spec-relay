@@ -9,6 +9,14 @@ from .store import WorkflowError
 from .workspace import relative_path
 
 
+DEFAULT_MODEL_POLICY = {
+    "implementation": "gpt-6-luna",
+    "task_review": "gpt-6.1-sol",
+    "schema_review": "gpt-6.1-sol",
+    "final_review": "gpt-6.1-sol",
+}
+
+
 def need(condition, message):
     if not condition:
         raise WorkflowError(message)
@@ -27,6 +35,7 @@ def names(value, label, empty=False):
 def validate_bundle(raw):
     need(isinstance(raw, dict), "The execution bundle must be an object.")
     bundle = json.loads(json.dumps(raw))
+    bundle["model_policy"] = _model_policy(bundle.get("model_policy"))
     need(type(bundle.get("version")) is int and bundle["version"] == 1, "Use execution bundle version 1.")
     _locations_and_limits(bundle)
     _lifecycle(bundle)
@@ -45,6 +54,15 @@ def validate_bundle(raw):
     names(bundle.get("final_checks"), "final check IDs")
     need(set(bundle["final_checks"]) <= set(checks), "Unknown final check.")
     return bundle
+
+
+def _model_policy(policy):
+    if policy is None:
+        return dict(DEFAULT_MODEL_POLICY)
+    need(isinstance(policy, dict), "The model policy must be an object.")
+    need(set(policy) == set(DEFAULT_MODEL_POLICY), "The model policy has unknown or missing roles.")
+    need(policy == DEFAULT_MODEL_POLICY, "Use the supported default model policy.")
+    return dict(DEFAULT_MODEL_POLICY)
 
 
 def _locations_and_limits(bundle):

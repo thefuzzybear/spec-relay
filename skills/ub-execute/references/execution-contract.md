@@ -71,3 +71,32 @@ Use `cleanup_policy: {"authorized": true, "on_complete": true}` when the user au
 The orchestrator must also release actual native writers, reviewers, and owned services for each exact resource revision.
 See [cleanup operations](../../../docs/cleanup-operations.md) for preservation, authorization, and restoration.
 Existing runs without creation manifests remain protected.
+
+
+## Native model policy
+
+New bundles receive this fixed default policy when `model_policy` is absent:
+
+```json
+{
+  "implementation": "gpt-6-luna",
+  "task_review": "gpt-6.1-sol",
+  "schema_review": "gpt-6.1-sol",
+  "final_review": "gpt-6.1-sol"
+}
+```
+
+An explicit `model_policy` must preserve these role defaults. Unknown fields and model substitutions fail validation.
+The orchestrator keeps its selected model. The MCP does not select that model.
+
+Call `agent_requirements` before native dispatch. Register the returned native agent ID and exact requested model with `agent_register`.
+Claims and reviews require an assignment for their current target. Changed review targets require a fresh native reviewer.
+A registration records a request. It does not authenticate native identity or establish the actual model.
+Optional model reports retain their source and reference. Missing host information stays unknown.
+
+`task_escalate` changes one pending coding task from Luna to Sol with an explicit reason.
+Stop and abandon any active attempt before escalation. The replacement receives a new worktree and must produce current evidence.
+Escalation preserves prior attempts and the attempt limit. Reviews remain on Sol.
+
+Stored runs without `model_policy` retain legacy behavior. Create a new run to require model assignments.
+Read [native model operations](../../../docs/model-policy.md) for dispatch, provenance, and unavailable-model handling.

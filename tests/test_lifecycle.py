@@ -54,6 +54,7 @@ class LifecycleTest(unittest.TestCase):
     def complete(self, run):
         final = self.runtime.check_start(run['id'], 'test', 'final', 'Check the integrated result.')
         self.assertEqual(self.wait(final)['status'], 'passed')
+        self.fixture.register(run, 'independent-final', 'final_review', run['id'])
         self.runtime.run_review_record(run['id'], 'independent-final', ['REQ-1'], [], 'Verify the complete requirement.')
         return self.runtime.run_complete(run['id'], 'The reviewed specification is complete.')
 
@@ -205,6 +206,7 @@ class LifecycleTest(unittest.TestCase):
         test_execution.git(child,'commit','-qm','Propose the feature schema')
         original = test_execution.git(child,'rev-parse','HEAD')
         proposal = self.runtime.schema_change_request(attempt['id'],{'commit':original,'expected_fingerprint':'after','schema_paths':['schema/']},'Request parent schema application.')
+        self.fixture.register(first, 'schema-reviewer', 'schema_review', proposal['id'])
         self.runtime.schema_review(proposal['id'],'schema-reviewer','Review the schema-only commit.')
         capability = (fixture.state/'parents'/workspace['id']/'coordinator.capability').read_text().strip()
         applied = self.runtime.coordinator_apply(proposal['id'],capability,'Apply the reviewed schema from the parent.')
@@ -265,6 +267,7 @@ class LifecycleTest(unittest.TestCase):
     def test_task_named_integration_has_a_distinct_branch_namespace(self):
         self.fixture.bundle['tasks'][0]['id'] = 'integration'
         run = self.fixture.create()
+        self.fixture.register(run, 'worker', 'implementation', 'integration')
         attempt = self.runtime.task_claim(run['id'], 'integration', 'worker', 'Use a task ID that matches the integration label.')
         self.assertTrue(Path(attempt['worktree']).is_dir())
         self.assertNotEqual(attempt['branch'], run['integration_branch'])
@@ -317,6 +320,7 @@ class LifecycleTest(unittest.TestCase):
         test_execution.git(child,'add','schema')
         test_execution.git(child,'commit','-qm','Propose recoverable schema')
         proposal = self.runtime.schema_change_request(attempt['id'],{'commit':test_execution.git(child,'rev-parse','HEAD'),'expected_fingerprint':'after','schema_paths':['schema/']},'Request recoverable schema application.')
+        fixture.register(run, 'reviewer', 'schema_review', proposal['id'])
         self.runtime.schema_review(proposal['id'],'reviewer','Review the recoverable schema change.')
         capability = (fixture.state/'parents'/workspace['id']/'coordinator.capability').read_text().strip()
         with patch.object(self.runtime,'_advance_parent',side_effect=RuntimeError('simulated bookkeeping interruption')):
@@ -341,6 +345,7 @@ class LifecycleTest(unittest.TestCase):
         test_execution.git(child,'add','schema')
         test_execution.git(child,'commit','-qm','Deliver schema-only task')
         proposal = self.runtime.schema_change_request(attempt['id'],{'commit':test_execution.git(child,'rev-parse','HEAD'),'expected_fingerprint':'after','schema_paths':['schema/']},'Request schema-only task application.')
+        fixture.register(run, 'reviewer', 'schema_review', proposal['id'])
         self.runtime.schema_review(proposal['id'],'reviewer','Review the schema-only requirement.')
         capability = (fixture.state/'parents'/workspace['id']/'coordinator.capability').read_text().strip()
         self.runtime.coordinator_apply(proposal['id'],capability,'Apply the schema-only task from the parent.')

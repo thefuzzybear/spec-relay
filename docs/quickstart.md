@@ -39,3 +39,6 @@ Use $ub-execute to recover and continue run <run-id>.
 ```
 
 The state directory lives in the Spec Relay checkout by default. Keep it to retain the run records and worktrees. For check configuration, see the [execution contract](../skills/ub-execute/references/execution-contract.md).
+
+New runs request Luna for coding and Sol 6.1 for reviews.
+Read [native model policy](model-policy.md) if the host cannot select either model or a coding task needs escalation.

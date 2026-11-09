@@ -43,3 +43,23 @@ Prepared Node environments now record runtime identity and declarations. Runtime
 The cleanup status tool declares its reconciliation mutations.
 
 Release preparation clarified the live SQL case count and the cache adapter requirements. No runtime code changed in that correction.
+
+
+## 2026-11-10: Native model assignments and escalation
+
+- Read repository instructions, skills, official native-agent documentation, and saved memory. No matching saved memory was present.
+- Created a private implementation specification and durable execution run. Assigned coding to a native Luna worker and review to native Sol 6.1 agents.
+- Added fixed defaults for Luna coding and Sol task, schema, and final reviews. Preserved stored legacy runs.
+- Added pre-spawn requirements, immutable target-bound registrations, optional model provenance, and explicit coding escalation.
+- Observed focused failures before implementation. Fixed the test launcher to select candidate source instead of the installed editable source.
+- Added independent regressions for model changes under one native ID and asymmetric coding/review role reuse.
+- Added positive registration, paused-run, metadata, legacy, and recovery cases after mutation checks exposed missing coverage.
+- Removed redundant selection and fallback logic. Split functions to meet the complexity limit.
+- Verified final tests against a saved baseline, then restored exact candidate bytes and reran the suite.
+- Ran runtime coverage with an owned disposable PostgreSQL server. Kept its connection details private.
+- Ran Crapper, Dryer, and selected model-policy mutants. Kept all QA artifacts outside the public snapshot.
+- Exercised the updated skill with real native Luna coding and separate Sol task and final reviews in a disposable repository.
+- Updated the skill, model operations guide, execution contract, README, verification record, and release metadata.
+
+The durable event logs retain assignments, reasons, red and green evidence, reviews, and integration.
+Native model requests remain distinct from observed host metadata.
